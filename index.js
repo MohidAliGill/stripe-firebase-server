@@ -1,7 +1,8 @@
+
 // Add the respective keys below
-const DATABASE_URL = 'your-database-url';
-const STRIPE_SECRET_KEY = 'stripe-secret-key';
-const WEBHOOK_SIGNING_KEY = 'webhook-signing-key'
+const DATABASE_URL = 'database-key';
+const STRIPE_SECRET_KEY = 'stripe-secret';
+const WEBHOOK_SIGNING_KEY = 'webhook-secret'
 
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -187,7 +188,7 @@ app.post('/create-connected-account', async (req, res) => {
     const account = await stripe.accounts.create({
       type: 'express',
       email: email,
-      country: 'UK',
+      country: 'GB',
       capabilities: {
         card_payments: { requested: true },
         transfers: { requested: true },
@@ -207,13 +208,13 @@ app.post('/create-connected-account', async (req, res) => {
 });
 
 app.post('/create-account-link', async (req, res) => {
-  const { accountId, refreshUrl, returnUrl } = req.body;
+  const { accountId } = req.body;
 
   try {
     const accountLink = await stripe.accountLinks.create({
       account: accountId,
-      refresh_url: refreshUrl,
-      return_url: returnUrl,
+      refresh_url: 'https://www.google.com', //change these URLs accordingly
+      return_url: 'https://www.google.com',
       type: 'account_onboarding',
     });
 
@@ -225,6 +226,74 @@ app.post('/create-account-link', async (req, res) => {
 });
 
 // Withdraw money API
+app.post('/create-connected-account', async (req, res) => {
+  const { barberId, email } = req.body;
+
+  try {
+    const account = await stripe.accounts.create({
+      type: 'express',
+      email: email,
+      country: 'GB', // Adjust based on your barber's country
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true },
+      },
+    });
+
+    // Save the account ID in your database
+    await db.collection('barbers').doc(barberId).set({
+      stripeAccountId: account.id,
+    }, { merge: true });
+
+    res.json({ accountId: account.id });
+  } catch (error) {
+    console.error('Error creating connected account:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/create-account-link', async (req, res) => {
+  const { accountId } = req.body;
+
+  try {
+    const accountLink = await stripe.accountLinks.create({
+      account: accountId,
+      type: 'account_onboarding',
+    });
+
+    res.json({ url: accountLink.url });
+  } catch (error) {
+    console.error('Error creating account link:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/create-payout', async (req, res) => {
+  const { amount, barberId } = req.body;
+
+  try {
+    // Fetch barber's document from Firestore to get the Stripe account ID
+    const barberDoc = await db.collection('barbers').doc(barberId).get();
+    if (!barberDoc.exists || !barberDoc.data().stripeAccountId) {
+      throw new Error('Barber does not have a Stripe account');
+    }
+
+    const stripeAccountId = barberDoc.data().stripeAccountId;
+
+    const payout = await stripe.payouts.create({
+      amount: amount * 100, // Convert to the smallest currency unit
+      currency: 'gbp',
+      method: 'instant', // Optional: specify payout method, e.g., 'standard' or 'instant'
+    }, {
+      stripeAccount: stripeAccountId, // The connected account ID
+    });
+
+    res.json({ payout });
+  } catch (error) {
+    console.error('Error creating payout:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 const port = 3000;
 app.listen(port, () => {
